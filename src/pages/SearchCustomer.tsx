@@ -53,7 +53,8 @@ const SearchCustomer = () => {
   const [searchName, setSearchName] = useState(
     (location.state as any)?.customerName || ""
   );
-  const [customer, setCustomer] = useState<Customer | null>(null);
+  const [searchResults, setSearchResults] = useState<Customer[]>([]);
+  const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [purchases, setPurchases] = useState<Purchase[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
   const [loading, setLoading] = useState(false);
@@ -77,46 +78,53 @@ const SearchCustomer = () => {
 
     setLoading(true);
     setSearched(true);
+    setSelectedCustomer(null);
+    setPurchases([]);
+    setPayments([]);
 
     try {
-      // Find customer
-      const { data: customerData } = await supabase
+      // Find all customers matching the search
+      const { data: customersData } = await supabase
         .from("customers")
         .select("*")
-        .ilike("name", searchName.trim())
-        .limit(1)
-        .single();
+        .ilike("name", `%${searchName.trim()}%`)
+        .order("name");
 
-      if (customerData) {
-        setCustomer(customerData);
-
-        // Fetch purchases
-        const { data: purchasesData } = await supabase
-          .from("purchases")
-          .select("*")
-          .eq("customer_id", customerData.id)
-          .order("created_at", { ascending: false });
-
-        setPurchases((purchasesData || []).map(p => ({
-          ...p,
-          items: p.items as { name: string; price: number }[]
-        })));
-
-        // Fetch payments
-        const { data: paymentsData } = await supabase
-          .from("payments")
-          .select("*")
-          .eq("customer_id", customerData.id)
-          .order("created_at", { ascending: false });
-
-        setPayments(paymentsData || []);
-      } else {
-        setCustomer(null);
-        setPurchases([]);
-        setPayments([]);
-      }
+      setSearchResults(customersData || []);
     } catch (error) {
       console.error("Error searching customer:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSelectCustomer = async (customer: Customer) => {
+    setSelectedCustomer(customer);
+    setLoading(true);
+
+    try {
+      // Fetch purchases
+      const { data: purchasesData } = await supabase
+        .from("purchases")
+        .select("*")
+        .eq("customer_id", customer.id)
+        .order("created_at", { ascending: false });
+
+      setPurchases((purchasesData || []).map(p => ({
+        ...p,
+        items: p.items as { name: string; price: number }[]
+      })));
+
+      // Fetch payments
+      const { data: paymentsData } = await supabase
+        .from("payments")
+        .select("*")
+        .eq("customer_id", customer.id)
+        .order("created_at", { ascending: false });
+
+      setPayments(paymentsData || []);
+    } catch (error) {
+      console.error("Error fetching customer data:", error);
     } finally {
       setLoading(false);
     }
@@ -129,13 +137,13 @@ const SearchCustomer = () => {
   };
 
   const handleEditName = async () => {
-    if (!customer || !editData?.name) return;
+    if (!selectedCustomer || !editData?.name) return;
 
     try {
       const { error } = await supabase
         .from("customers")
         .update({ name: editData.name })
-        .eq("id", customer.id);
+        .eq("id", selectedCustomer.id);
 
       if (error) throw error;
 
@@ -144,7 +152,7 @@ const SearchCustomer = () => {
         description: "تم تحديث اسم العميل بنجاح",
       });
 
-      setCustomer({ ...customer, name: editData.name });
+      setSelectedCustomer({ ...selectedCustomer, name: editData.name });
       setEditDialogOpen(false);
     } catch (error) {
       console.error("Error updating customer:", error);
@@ -176,7 +184,9 @@ const SearchCustomer = () => {
       });
 
       // Refresh data
-      handleSearch();
+      if (selectedCustomer) {
+        handleSelectCustomer(selectedCustomer);
+      }
       setEditDialogOpen(false);
     } catch (error) {
       console.error("Error updating purchase:", error);
@@ -189,7 +199,7 @@ const SearchCustomer = () => {
   };
 
   const handleEditPayment = async () => {
-    if (!customer || !editData) return;
+    if (!selectedCustomer || !editData) return;
 
     try {
       const oldPayment = payments.find((p) => p.id === editData.id);
@@ -208,8 +218,8 @@ const SearchCustomer = () => {
       // Update customer debt
       const { error: customerError } = await supabase
         .from("customers")
-        .update({ total_debt: customer.total_debt + difference })
-        .eq("id", customer.id);
+        .update({ total_debt: selectedCustomer.total_debt + difference })
+        .eq("id", selectedCustomer.id);
 
       if (customerError) throw customerError;
 
@@ -218,7 +228,9 @@ const SearchCustomer = () => {
         description: "تم تحديث الدفعة بنجاح",
       });
 
-      handleSearch();
+      if (selectedCustomer) {
+        handleSelectCustomer(selectedCustomer);
+      }
       setEditDialogOpen(false);
     } catch (error) {
       console.error("Error updating payment:", error);
@@ -231,7 +243,7 @@ const SearchCustomer = () => {
   };
 
   const handleDelete = async () => {
-    if (!deleteType || !deleteId || !customer) return;
+    if (!deleteType || !deleteId || !selectedCustomer) return;
 
     try {
       if (deleteType === "purchase") {
@@ -249,8 +261,8 @@ const SearchCustomer = () => {
         // Update customer debt
         await supabase
           .from("customers")
-          .update({ total_debt: customer.total_debt - purchase.purchase_total })
-          .eq("id", customer.id);
+          .update({ total_debt: selectedCustomer.total_debt - purchase.purchase_total })
+          .eq("id", selectedCustomer.id);
       } else if (deleteType === "payment") {
         const payment = payments.find((p) => p.id === deleteId);
         if (!payment) return;
@@ -266,8 +278,8 @@ const SearchCustomer = () => {
         // Update customer debt
         await supabase
           .from("customers")
-          .update({ total_debt: customer.total_debt + payment.amount_paid })
-          .eq("id", customer.id);
+          .update({ total_debt: selectedCustomer.total_debt + payment.amount_paid })
+          .eq("id", selectedCustomer.id);
       }
 
       toast({
@@ -275,7 +287,9 @@ const SearchCustomer = () => {
         description: "تم الحذف بنجاح",
       });
 
-      handleSearch();
+      if (selectedCustomer) {
+        handleSelectCustomer(selectedCustomer);
+      }
       setDeleteDialogOpen(false);
     } catch (error) {
       console.error("Error deleting:", error);
@@ -331,23 +345,64 @@ const SearchCustomer = () => {
         </Card>
 
         {/* Results */}
-        {loading ? (
+        {loading && !selectedCustomer ? (
           <div className="text-center py-12">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
             <p className="text-muted-foreground">جاري البحث...</p>
           </div>
-        ) : customer ? (
+        ) : searchResults.length > 0 && !selectedCustomer ? (
+          <div className="space-y-4 animate-slide-up">
+            <h2 className="text-xl font-bold">نتائج البحث ({searchResults.length})</h2>
+            <div className="grid gap-4">
+              {searchResults.map((customer) => (
+                <Card
+                  key={customer.id}
+                  className="p-4 shadow-card hover:shadow-lg transition-shadow cursor-pointer"
+                  onClick={() => handleSelectCustomer(customer)}
+                >
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="text-xl font-bold">{customer.name}</h3>
+                      <p className="text-sm text-muted-foreground">
+                        تاريخ التسجيل: {format(new Date(customer.created_at!), "d MMMM yyyy", { locale: ar })}
+                      </p>
+                    </div>
+                    <div className="text-left">
+                      <p className="text-sm text-muted-foreground mb-1">المبلغ المستحق</p>
+                      <p className="text-2xl font-bold text-warning">
+                        {Number(customer.total_debt).toFixed(2)} ج.م
+                      </p>
+                    </div>
+                  </div>
+                </Card>
+              ))}
+            </div>
+          </div>
+        ) : selectedCustomer ? (
           <div className="space-y-6 animate-slide-up">
+            {/* Back to Results */}
+            <Button
+              variant="outline"
+              onClick={() => {
+                setSelectedCustomer(null);
+                setPurchases([]);
+                setPayments([]);
+              }}
+            >
+              <ArrowRight className="w-4 h-4 ml-2" />
+              العودة للنتائج
+            </Button>
+
             {/* Customer Info */}
             <Card className="p-6 shadow-card">
               <div className="flex items-center justify-between mb-4">
-                <h2 className="text-2xl font-bold">{customer.name}</h2>
+                <h2 className="text-2xl font-bold">{selectedCustomer.name}</h2>
                 <Button
                   variant="outline"
                   size="sm"
                   onClick={() => {
                     setEditType("name");
-                    setEditData({ name: customer.name });
+                    setEditData({ name: selectedCustomer.name });
                     setEditDialogOpen(true);
                   }}
                 >
@@ -358,7 +413,7 @@ const SearchCustomer = () => {
               <div className="flex items-center justify-between p-4 bg-warning-light rounded-lg">
                 <span className="text-lg font-semibold">إجمالي المبلغ المستحق:</span>
                 <span className="text-3xl font-bold text-warning">
-                  {Number(customer.total_debt).toFixed(2)} ج.م
+                  {Number(selectedCustomer.total_debt).toFixed(2)} ج.م
                 </span>
               </div>
             </Card>
@@ -481,13 +536,13 @@ const SearchCustomer = () => {
 
             {/* Quick Actions */}
             <div className="flex gap-3">
-              <Link to="/record-payment" state={{ customer }} className="flex-1">
+              <Link to="/record-payment" state={{ customer: selectedCustomer }} className="flex-1">
                 <Button className="w-full" variant="outline">
                   <DollarSign className="w-4 h-4 ml-2" />
                   تسجيل دفعة
                 </Button>
               </Link>
-              <Link to="/new-transaction" state={{ customerName: customer.name }} className="flex-1">
+              <Link to="/new-transaction" state={{ customerName: selectedCustomer.name }} className="flex-1">
                 <Button className="w-full gradient-primary">
                   <ShoppingCart className="w-4 h-4 ml-2" />
                   إضافة مشتريات جديدة
@@ -495,9 +550,9 @@ const SearchCustomer = () => {
               </Link>
             </div>
           </div>
-        ) : searched ? (
+        ) : searched && searchResults.length === 0 ? (
           <Card className="p-12 text-center shadow-card animate-fade-in">
-            <p className="text-lg text-muted-foreground mb-4">لم يتم العثور على العميل</p>
+            <p className="text-lg text-muted-foreground mb-4">لم يتم العثور على أي عميل</p>
             <Link to="/new-transaction" state={{ customerName: searchName }}>
               <Button>إضافة عميل جديد</Button>
             </Link>

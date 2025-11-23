@@ -3,7 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Link } from "react-router-dom";
-import { Users, ShoppingCart, DollarSign, TrendingUp } from "lucide-react";
+import { Users, ShoppingCart, DollarSign, TrendingUp, Table } from "lucide-react";
 
 interface Stats {
   totalCustomers: number;
@@ -137,7 +137,7 @@ const Dashboard = () => {
         {/* Quick Actions */}
         <Card className="p-6 shadow-card animate-slide-up">
           <h2 className="text-xl font-bold mb-4">الإجراءات السريعة</h2>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
             <Link to="/new-transaction">
               <Button className="w-full h-24 text-lg" variant="outline">
                 <ShoppingCart className="ml-2" />
@@ -148,6 +148,12 @@ const Dashboard = () => {
               <Button className="w-full h-24 text-lg" variant="outline">
                 <Users className="ml-2" />
                 البحث عن عميل
+              </Button>
+            </Link>
+            <Link to="/all-customers">
+              <Button className="w-full h-24 text-lg gradient-primary">
+                <Table className="ml-2" />
+                جميع العملاء
               </Button>
             </Link>
             <Link to="/record-payment">

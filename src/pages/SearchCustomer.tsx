@@ -5,7 +5,26 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { ArrowRight, Search, Calendar, ShoppingCart, DollarSign } from "lucide-react";
+import { ArrowRight, Search, Calendar, ShoppingCart, DollarSign, Edit, Trash2 } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { format } from "date-fns";
 import { ar } from "date-fns/locale";
 
@@ -39,6 +58,13 @@ const SearchCustomer = () => {
   const [payments, setPayments] = useState<Payment[]>([]);
   const [loading, setLoading] = useState(false);
   const [searched, setSearched] = useState(false);
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [editType, setEditType] = useState<"name" | "purchase" | "payment" | null>(null);
+  const [editData, setEditData] = useState<any>(null);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deleteType, setDeleteType] = useState<"purchase" | "payment" | null>(null);
+  const [deleteId, setDeleteId] = useState<string | null>(null);
+  const { toast } = useToast();
 
   useEffect(() => {
     if ((location.state as any)?.customerName) {
@@ -102,6 +128,168 @@ const SearchCustomer = () => {
     }
   };
 
+  const handleEditName = async () => {
+    if (!customer || !editData?.name) return;
+
+    try {
+      const { error } = await supabase
+        .from("customers")
+        .update({ name: editData.name })
+        .eq("id", customer.id);
+
+      if (error) throw error;
+
+      toast({
+        title: "تم التحديث",
+        description: "تم تحديث اسم العميل بنجاح",
+      });
+
+      setCustomer({ ...customer, name: editData.name });
+      setEditDialogOpen(false);
+    } catch (error) {
+      console.error("Error updating customer:", error);
+      toast({
+        title: "خطأ",
+        description: "حدث خطأ في التحديث",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleEditPurchase = async () => {
+    if (!editData) return;
+
+    try {
+      const { error } = await supabase
+        .from("purchases")
+        .update({
+          items: editData.items,
+          purchase_total: editData.purchase_total,
+        })
+        .eq("id", editData.id);
+
+      if (error) throw error;
+
+      toast({
+        title: "تم التحديث",
+        description: "تم تحديث المشتريات بنجاح",
+      });
+
+      // Refresh data
+      handleSearch();
+      setEditDialogOpen(false);
+    } catch (error) {
+      console.error("Error updating purchase:", error);
+      toast({
+        title: "خطأ",
+        description: "حدث خطأ في التحديث",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleEditPayment = async () => {
+    if (!customer || !editData) return;
+
+    try {
+      const oldPayment = payments.find((p) => p.id === editData.id);
+      if (!oldPayment) return;
+
+      const difference = editData.amount_paid - oldPayment.amount_paid;
+
+      // Update payment
+      const { error: paymentError } = await supabase
+        .from("payments")
+        .update({ amount_paid: editData.amount_paid })
+        .eq("id", editData.id);
+
+      if (paymentError) throw paymentError;
+
+      // Update customer debt
+      const { error: customerError } = await supabase
+        .from("customers")
+        .update({ total_debt: customer.total_debt + difference })
+        .eq("id", customer.id);
+
+      if (customerError) throw customerError;
+
+      toast({
+        title: "تم التحديث",
+        description: "تم تحديث الدفعة بنجاح",
+      });
+
+      handleSearch();
+      setEditDialogOpen(false);
+    } catch (error) {
+      console.error("Error updating payment:", error);
+      toast({
+        title: "خطأ",
+        description: "حدث خطأ في التحديث",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!deleteType || !deleteId || !customer) return;
+
+    try {
+      if (deleteType === "purchase") {
+        const purchase = purchases.find((p) => p.id === deleteId);
+        if (!purchase) return;
+
+        // Delete purchase
+        const { error } = await supabase
+          .from("purchases")
+          .delete()
+          .eq("id", deleteId);
+
+        if (error) throw error;
+
+        // Update customer debt
+        await supabase
+          .from("customers")
+          .update({ total_debt: customer.total_debt - purchase.purchase_total })
+          .eq("id", customer.id);
+      } else if (deleteType === "payment") {
+        const payment = payments.find((p) => p.id === deleteId);
+        if (!payment) return;
+
+        // Delete payment
+        const { error } = await supabase
+          .from("payments")
+          .delete()
+          .eq("id", deleteId);
+
+        if (error) throw error;
+
+        // Update customer debt
+        await supabase
+          .from("customers")
+          .update({ total_debt: customer.total_debt + payment.amount_paid })
+          .eq("id", customer.id);
+      }
+
+      toast({
+        title: "تم الحذف",
+        description: "تم الحذف بنجاح",
+      });
+
+      handleSearch();
+      setDeleteDialogOpen(false);
+    } catch (error) {
+      console.error("Error deleting:", error);
+      toast({
+        title: "خطأ",
+        description: "حدث خطأ في الحذف",
+        variant: "destructive",
+      });
+    } finally {
+      setDeleteId(null);
+      setDeleteType(null);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-background">
       {/* Header */}
@@ -152,7 +340,21 @@ const SearchCustomer = () => {
           <div className="space-y-6 animate-slide-up">
             {/* Customer Info */}
             <Card className="p-6 shadow-card">
-              <h2 className="text-2xl font-bold mb-4">{customer.name}</h2>
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-2xl font-bold">{customer.name}</h2>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setEditType("name");
+                    setEditData({ name: customer.name });
+                    setEditDialogOpen(true);
+                  }}
+                >
+                  <Edit className="w-4 h-4 ml-2" />
+                  تعديل الاسم
+                </Button>
+              </div>
               <div className="flex items-center justify-between p-4 bg-warning-light rounded-lg">
                 <span className="text-lg font-semibold">إجمالي المبلغ المستحق:</span>
                 <span className="text-3xl font-bold text-warning">
@@ -178,9 +380,33 @@ const SearchCustomer = () => {
                             locale: ar,
                           })}
                         </div>
-                        <span className="font-bold text-primary">
-                          {Number(purchase.purchase_total).toFixed(2)} ج.م
-                        </span>
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-primary">
+                            {Number(purchase.purchase_total).toFixed(2)} ج.م
+                          </span>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              setEditType("purchase");
+                              setEditData(purchase);
+                              setEditDialogOpen(true);
+                            }}
+                          >
+                            <Edit className="w-4 h-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              setDeleteType("purchase");
+                              setDeleteId(purchase.id);
+                              setDeleteDialogOpen(true);
+                            }}
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </Button>
+                        </div>
                       </div>
                       <div className="space-y-1">
                         {purchase.items.map((item: any, idx: number) => (
@@ -220,9 +446,33 @@ const SearchCustomer = () => {
                           locale: ar,
                         })}
                       </div>
-                      <span className="font-bold text-success">
-                        - {Number(payment.amount_paid).toFixed(2)} ج.م
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-success">
+                          - {Number(payment.amount_paid).toFixed(2)} ج.م
+                        </span>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            setEditType("payment");
+                            setEditData(payment);
+                            setEditDialogOpen(true);
+                          }}
+                        >
+                          <Edit className="w-4 h-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            setDeleteType("payment");
+                            setDeleteId(payment.id);
+                            setDeleteDialogOpen(true);
+                          }}
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </Button>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -254,6 +504,121 @@ const SearchCustomer = () => {
           </Card>
         ) : null}
       </main>
+
+      {/* Edit Dialog */}
+      <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {editType === "name" && "تعديل اسم العميل"}
+              {editType === "purchase" && "تعديل المشتريات"}
+              {editType === "payment" && "تعديل الدفعة"}
+            </DialogTitle>
+          </DialogHeader>
+
+          {editType === "name" && (
+            <div className="space-y-4">
+              <Label htmlFor="editName">اسم العميل</Label>
+              <Input
+                id="editName"
+                value={editData?.name || ""}
+                onChange={(e) => setEditData({ ...editData, name: e.target.value })}
+              />
+            </div>
+          )}
+
+          {editType === "purchase" && editData && (
+            <div className="space-y-4">
+              <div>
+                <Label>المنتجات</Label>
+                {editData.items.map((item: any, idx: number) => (
+                  <div key={idx} className="flex gap-2 mt-2">
+                    <Input
+                      value={item.name}
+                      onChange={(e) => {
+                        const newItems = [...editData.items];
+                        newItems[idx].name = e.target.value;
+                        setEditData({ ...editData, items: newItems });
+                      }}
+                      placeholder="اسم المنتج"
+                    />
+                    <Input
+                      type="number"
+                      value={item.price}
+                      onChange={(e) => {
+                        const newItems = [...editData.items];
+                        newItems[idx].price = parseFloat(e.target.value) || 0;
+                        const total = newItems.reduce((sum, i) => sum + i.price, 0);
+                        setEditData({ ...editData, items: newItems, purchase_total: total });
+                      }}
+                      placeholder="السعر"
+                    />
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        const newItems = editData.items.filter((_: any, i: number) => i !== idx);
+                        const total = newItems.reduce((sum: number, i: any) => sum + i.price, 0);
+                        setEditData({ ...editData, items: newItems, purchase_total: total });
+                      }}
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+              <div className="text-lg font-bold">
+                الإجمالي: {Number(editData.purchase_total).toFixed(2)} ج.م
+              </div>
+            </div>
+          )}
+
+          {editType === "payment" && (
+            <div className="space-y-4">
+              <Label htmlFor="editPayment">المبلغ المدفوع</Label>
+              <Input
+                id="editPayment"
+                type="number"
+                value={editData?.amount_paid || 0}
+                onChange={(e) =>
+                  setEditData({ ...editData, amount_paid: parseFloat(e.target.value) || 0 })
+                }
+              />
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditDialogOpen(false)}>
+              إلغاء
+            </Button>
+            <Button
+              onClick={() => {
+                if (editType === "name") handleEditName();
+                else if (editType === "purchase") handleEditPurchase();
+                else if (editType === "payment") handleEditPayment();
+              }}
+            >
+              حفظ التغييرات
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>تأكيد الحذف</AlertDialogTitle>
+            <AlertDialogDescription>
+              هل أنت متأكد من حذف هذا العنصر؟ هذا الإجراء لا يمكن التراجع عنه.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>إلغاء</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDelete}>حذف</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };
